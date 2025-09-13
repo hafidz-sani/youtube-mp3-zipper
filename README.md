@@ -11,6 +11,7 @@ Aplikasi Streamlit untuk mengunduh audio YouTube menjadi MP3 (hingga 320 kbps) d
 - Pengaturan folder output sementara (default `out_mp3/`).
 - Opsi lokasi `ffmpeg` kustom jika tidak ada di PATH.
 - Tabel progres dan ukuran file per video.
+ - Penamaan file: "Artis - Judul.mp3" dengan tag ID3 `artist` dan `title` diisi.
 
 ## Prasyarat
 - Python 3.9+ (disarankan 3.10/3.11).
@@ -69,6 +70,7 @@ Streamlit akan menampilkan URL lokal (mis. http://localhost:8501). Buka di brows
 
 4) Klik tombol "Mulai Download & Buat ZIP". Proses akan:
    - Mengunduh audio, mengonversi ke MP3, menempelkan thumbnail (jika dipilih).
+   - Menamai file sebagai "Artis - Judul.mp3" (menghindari bentrok nama otomatis dengan suffix (n)).
    - Menampilkan tabel status, judul, ukuran, dan nama file.
    - Mengemas hasil menjadi ZIP sesuai mode yang dipilih.
 
@@ -86,4 +88,3 @@ Streamlit akan menampilkan URL lokal (mis. http://localhost:8501). Buka di brows
 
 ## Disclaimer
 Aplikasi ini ditujukan untuk penggunaan pribadi/pendidikan. Patuhilah syarat layanan (ToS) dan hukum hak cipta yang berlaku di wilayah Anda. Anda bertanggung jawab atas penggunaan Anda sendiri.
-

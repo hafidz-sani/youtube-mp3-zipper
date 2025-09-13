@@ -9,6 +9,7 @@ from typing import List, Optional, Dict, Any, Tuple
 import streamlit as st
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
+from mutagen.id3 import ID3, ID3NoHeaderError, TPE1, TIT2
 
 
 # =========================
@@ -28,6 +29,40 @@ def slugify(name: str, maxlen: int = 80) -> str:
     name = re.sub(r"[^\w\s-]", "", name, flags=re.UNICODE).strip()
     name = re.sub(r"[\s_-]+", "_", name)
     return (name[:maxlen]).strip("_") or "untitled"
+
+
+def human_filename(text: str, maxlen: int = 120) -> str:
+    """Sanitasi nama file agar tetap 'ramah manusia' (spasi & tanda minus dipertahankan).
+    Menghapus karakter terlarang Windows: <>:"/\|?* dan merapikan spasi.
+    """
+    if not text:
+        return "untitled"
+    text = re.sub(r'[<>:"/\\|?*]', '', text)
+    text = re.sub(r"\s+", " ", text).strip(" .-_")
+    return (text or "untitled")[:maxlen]
+
+
+def compute_artist_title(info: Dict[str, Any]) -> Tuple[str, str]:
+    """Dapatkan (artist, title) dari metadata dengan fallback yang masuk akal."""
+    artist = info.get("artist") or info.get("uploader") or info.get("channel") or "Unknown Artist"
+    title = info.get("track") or info.get("alt_title") or info.get("title") or "Unknown Title"
+    return human_filename(artist, 80), human_filename(title, 120)
+
+
+def set_id3_basic(file_path: str, artist: str, title: str) -> None:
+    """Set metadata ID3 dasar (artist & title) tanpa mengganggu tag lain (thumbnail dsb)."""
+    try:
+        try:
+            tags = ID3(file_path)
+        except ID3NoHeaderError:
+            tags = ID3()
+        # Ganti nilai agar tidak duplikat
+        tags.setall('TPE1', [TPE1(encoding=3, text=artist)])
+        tags.setall('TIT2', [TIT2(encoding=3, text=title)])
+        tags.save(file_path)
+    except Exception:
+        # Jangan gagalkan proses hanya karena penulisan tag gagal
+        pass
 
 
 def make_ydl_opts(output_dir: str,
@@ -83,8 +118,33 @@ def download_one(url: str, output_dir: str, ydl_opts: Dict[str, Any]) -> Dict[st
                         mp3_path = os.path.join(output_dir, name); break
 
             if os.path.exists(mp3_path):
-                rec["status"] = "ok"; rec["path"] = mp3_path
-                try: rec["filesize_mb"] = round(os.path.getsize(mp3_path)/(1024*1024), 2)
+                # Setelah file jadi, ubah nama menjadi "Artist - Title.mp3" dan set metadata dasar
+                artist_name, title_name = compute_artist_title(info)
+                target_base = human_filename(f"{artist_name} - {title_name}", 180)
+                target_path = os.path.join(output_dir, f"{target_base}.mp3")
+                final_path = mp3_path
+                try:
+                    if os.path.abspath(mp3_path) != os.path.abspath(target_path):
+                        # Hindari tabrakan nama: tambah suffix (1), (2), ... bila perlu
+                        if os.path.exists(target_path):
+                            n = 1
+                            while True:
+                                candidate = os.path.join(output_dir, f"{target_base} ({n}).mp3")
+                                if not os.path.exists(candidate):
+                                    target_path = candidate
+                                    break
+                                n += 1
+                        os.replace(mp3_path, target_path)
+                        final_path = target_path
+                except Exception:
+                    # Jika rename gagal, tetap gunakan mp3_path
+                    final_path = mp3_path
+
+                # Tulis metadata dasar (artist & title) untuk memudahkan pengelompokan
+                set_id3_basic(final_path, artist_name, title_name)
+
+                rec["status"] = "ok"; rec["path"] = final_path
+                try: rec["filesize_mb"] = round(os.path.getsize(final_path)/(1024*1024), 2)
                 except Exception: pass
             else:
                 rec["status"] = "failed"; rec["error"] = "File MP3 tidak ditemukan setelah konversi."
