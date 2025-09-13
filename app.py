@@ -2,6 +2,7 @@ import io
 import os
 import re
 import zipfile
+import tempfile
 import shutil
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Tuple
@@ -65,6 +66,26 @@ def set_id3_basic(file_path: str, artist: str, title: str) -> None:
         pass
 
 
+def ensure_writable_output_dir(path: str) -> Tuple[str, Optional[str]]:
+    """Pastikan folder output bisa ditulis. Jika gagal, fallback ke /tmp/out_mp3.
+    Mengembalikan (final_path, note_message_or_None).
+    """
+    try:
+        os.makedirs(path, exist_ok=True)
+        testfile = os.path.join(path, ".write_test")
+        with open(testfile, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(testfile)
+        return path, None
+    except Exception as e:
+        fallback = os.path.join(tempfile.gettempdir(), "out_mp3")
+        try:
+            os.makedirs(fallback, exist_ok=True)
+        except Exception:
+            pass
+        return fallback, f"Folder '{path}' tidak bisa ditulis (\"{e}\"). Menggunakan '{fallback}'."
+
+
 def make_ydl_opts(output_dir: str,
                   bitrate_kbps: int,
                   embed_thumb: bool,
@@ -85,6 +106,8 @@ def make_ydl_opts(output_dir: str,
         "writethumbnail": embed_thumb,
         "quiet": True,
         "no_warnings": True,
+        "prefer_ffmpeg": True,
+        "geo_bypass": True,
     }
     if ffmpeg_location:
         opts["ffmpeg_location"] = ffmpeg_location
@@ -317,11 +340,19 @@ if start:
     table_area = st.empty()
     results = []
 
+    # Pastikan folder output bisa ditulis; fallback ke /tmp bila perlu
+    out_dir_effective, out_note = ensure_writable_output_dir(output_dir)
+    if out_note:
+        st.warning(out_note)
+
+    # Deteksi otomatis ffmpeg jika kolom kosong
+    ffmpeg_auto = ffmpeg_loc.strip() or shutil.which("ffmpeg") or None
+
     ydl_opts = make_ydl_opts(
-        output_dir=output_dir,
+        output_dir=out_dir_effective,
         bitrate_kbps=int(bitrate),
         embed_thumb=bool(embed_thumb),
-        ffmpeg_location=ffmpeg_loc.strip() or None,
+        ffmpeg_location=ffmpeg_auto,
     )
 
     # Grup untuk mode 'Satu ZIP per playlist'
@@ -332,7 +363,7 @@ if start:
     total = len(all_video_urls)
 
     for idx, url in enumerate(all_video_urls, start=1):
-        rec = download_one(url, output_dir, ydl_opts)
+        rec = download_one(url, out_dir_effective, ydl_opts)
         results.append(rec)
 
         if rec.get("status") == "ok" and rec.get("path"):
@@ -350,6 +381,7 @@ if start:
             "Status": r.get("status"),
             "Ukuran (MB)": r.get("filesize_mb"),
             "File": os.path.basename(r.get("path")) if r.get("path") else "-",
+            "Error": (r.get("error") or "").splitlines()[0][:120] if r.get("status") != "ok" else "",
         } for i, r in enumerate(results)]
         table_area.dataframe(rows, hide_index=True, use_container_width=True)
         progress.progress(int(idx * 100 / max(total, 1)))
@@ -358,6 +390,13 @@ if start:
         st.error("Tidak ada MP3 yang berhasil dibuat. Cek URL/FFmpeg/Koneksi.")
         # Reset state hasil
         st.session_state.pop("zip_state", None)
+        # Tampilkan rincian error agar mudah diagnosa
+        failed = [r for r in results if r.get("status") != "ok"]
+        if failed:
+            with st.expander("Detail error (diagnostik)", expanded=False):
+                for i, r in enumerate(failed, 1):
+                    st.write(f"{i}. URL: {r.get('url')}")
+                    st.code(r.get("error") or "(tidak ada pesan)")
     else:
         st.success(f"Berhasil membuat {len(ok_paths)} file MP3.")
 
@@ -365,7 +404,7 @@ if start:
         ts_now = datetime.now().strftime('%Y%m%d_%H%M%S')
         zip_state = {
             "mode": "gabungan" if zip_mode.startswith("Gabungkan") else "per_playlist",
-            "output_dir": output_dir,
+            "output_dir": out_dir_effective,
             "cleaned": False,
         }
 
@@ -378,7 +417,7 @@ if start:
                     "combined_bytes": zip_bytes,
                     "combined_name": zip_name,
                 })
-                st.info(f"File MP3 sementara tersimpan di folder: `{os.path.abspath(output_dir)}`")
+                st.info(f"File MP3 sementara tersimpan di folder: `{os.path.abspath(out_dir_effective)}`")
             except Exception as e:
                 st.error(f"Gagal membuat ZIP: {e}")
                 st.session_state.pop("zip_state", None)
@@ -446,3 +485,18 @@ if zip_state and not zip_state.get("cleaned", False):
             zip_state["cleaned"] = True
             st.session_state["zip_state"] = zip_state
             st.success(f"Folder output '{zip_state.get('output_dir')}' telah dibersihkan.")
+
+# Info lingkungan (diagnostik)
+with st.expander("ℹ️ Info lingkungan", expanded=False):
+    import sys
+    try:
+        from yt_dlp.version import __version__ as ytdlp_version
+    except Exception:
+        ytdlp_version = "unknown"
+    st.write({
+        "python": sys.version.split(" (", 1)[0],
+        "streamlit": st.__version__,
+        "yt_dlp": ytdlp_version,
+        "ffmpeg_path": shutil.which("ffmpeg"),
+        "output_dir": os.path.abspath(st.session_state.get("zip_state", {}).get("output_dir") or (locals().get("out_dir_effective") or "out_mp3")),
+    })
