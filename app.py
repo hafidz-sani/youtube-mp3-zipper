@@ -33,7 +33,7 @@ def slugify(name: str, maxlen: int = 80) -> str:
 
 
 def human_filename(text: str, maxlen: int = 120) -> str:
-    """Sanitasi nama file agar tetap 'ramah manusia' (spasi & tanda minus dipertahankan).
+    r"""Sanitasi nama file agar tetap 'ramah manusia' (spasi & tanda minus dipertahankan).
     Menghapus karakter terlarang Windows: <>:"/\|?* dan merapikan spasi.
     """
     if not text:
@@ -101,7 +101,7 @@ def make_ydl_opts(output_dir: str,
         "format": "bestaudio/best",
         "outtmpl": outtmpl,
         "noplaylist": True,          # kita expand playlist manual; jadi tetap True
-        "ignoreerrors": True,
+        "ignoreerrors": False,       # biar error nyata terangkat (lebih mudah debug)
         "postprocessors": pp,
         "writethumbnail": embed_thumb,
         "quiet": True,
@@ -126,7 +126,26 @@ def download_one(url: str, output_dir: str, ydl_opts: Dict[str, Any]) -> Dict[st
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             if not info:
-                rec["status"] = "failed"; rec["error"] = "Tidak dapat mengambil metadata."; return rec
+                # Coba fallback extractor args (mis. client Android) + header UA
+                fallback_opts = dict(ydl_opts)
+                # copy list agar tidak termodifikasi silang
+                if 'postprocessors' in fallback_opts and isinstance(fallback_opts['postprocessors'], list):
+                    fallback_opts['postprocessors'] = list(fallback_opts['postprocessors'])
+                fallback_opts['extractor_args'] = {
+                    'youtube': {
+                        'player_client': ['android', 'android_music', 'web']
+                    }
+                }
+                fallback_opts['http_headers'] = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
+                }
+                try:
+                    with YoutubeDL(fallback_opts) as y2:
+                        info = y2.extract_info(url, download=True)
+                except Exception as e2:
+                    rec["status"] = "failed"; rec["error"] = f"Fallback extractor gagal: {e2}"; return rec
+                if not info:
+                    rec["status"] = "failed"; rec["error"] = "Tidak dapat mengambil metadata (fallback juga gagal)."; return rec
             if "entries" in info and info["entries"]:
                 info = info["entries"][0]
 
