@@ -1,4 +1,4 @@
-YouTube → MP3 Zipper
+# YouTube → MP3 Zipper
 
 Aplikasi Streamlit untuk mengunduh audio YouTube menjadi MP3 (hingga 320 kbps) dari URL video dan/atau playlist, menyematkan thumbnail sebagai album art, lalu mengemas hasilnya ke dalam file ZIP — gabungan tunggal atau per playlist. Mendukung input teks/berkas, pengaturan folder output, serta opsi lokasi FFmpeg.
 
